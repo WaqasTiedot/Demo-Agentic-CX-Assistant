@@ -75,7 +75,11 @@ def process_refund(order_id: str, reason: str) -> dict:
 
 # Initialize ChromaDB for knowledge base
 try:
-    embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+    embeddings = HuggingFaceEmbeddings(
+    model_name="sentence-transformers/all-MiniLM-L6-v2",
+    model_kwargs={'device': 'cpu'},
+    encode_kwargs={'normalize_embeddings': True}
+	)
     
     knowledge_articles = [
         "Refund Policy: We offer a 30-day money-back guarantee on all products. Simply contact support with your order ID and we'll process your refund within 3-5 business days.",
