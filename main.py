@@ -6,7 +6,10 @@ import os
 import uuid
 
 from langchain.agents import AgentExecutor, create_openai_tools_agent
-from langchain_anthropic import ChatAnthropic, AnthropicEmbeddings
+
+from langchain_anthropic import ChatAnthropic
+from langchain_community.embeddings import HuggingFaceEmbeddings
+
 from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain.tools import tool
 from langchain.memory import ConversationBufferMemory
@@ -72,7 +75,7 @@ def process_refund(order_id: str, reason: str) -> dict:
 
 # Initialize ChromaDB for knowledge base
 try:
-    embeddings = AnthropicEmbeddings()
+    embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
     
     knowledge_articles = [
         "Refund Policy: We offer a 30-day money-back guarantee on all products. Simply contact support with your order ID and we'll process your refund within 3-5 business days.",
