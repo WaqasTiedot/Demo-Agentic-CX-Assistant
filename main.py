@@ -1,23 +1,24 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import List, Dict, Optional
+from typing import Optional, List, Dict
 import os
-import uuid
+from dotenv import load_dotenv
 
-from langchain.agents import AgentExecutor, create_tool_calling_agent
-
+# LangChain imports
 from langchain_anthropic import ChatAnthropic
-from langchain_community.embeddings import HuggingFaceEmbeddings
-
-from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain.agents import AgentExecutor, create_tool_calling_agent
 from langchain.tools import tool
 from langchain.memory import ConversationBufferMemory
-from langchain_community.vectorstores import Chroma
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
+# Load environment variables
+load_dotenv()
+
+# Initialize FastAPI
 app = FastAPI(title="Agentic CX Assistant")
 
-# CORS for Loveable frontend
+# CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -26,202 +27,181 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize Claude
-llm = ChatAnthropic(
-    model="claude-3-5-sonnet-20241022",
-    anthropic_api_key=os.getenv("ANTHROPIC_API_KEY"),
-    temperature=0
-)
+# Session storage
+sessions: Dict[str, ConversationBufferMemory] = {}
 
-# Define agent tools
+# Simple knowledge base (lightweight, no vector DB)
+knowledge_base = {
+    "refund": "Refund Policy: We offer a 30-day money-back guarantee on all products. Contact support with your order ID and we'll process your refund within 3-5 business days. Refunds are issued to the original payment method.",
+    "shipping": "Shipping Policy: All orders ship within 24 hours of purchase. Domestic delivery takes 3-5 business days, international shipping takes 7-14 days. Free shipping on orders over $50. Tracking numbers sent via email.",
+    "return": "Return Process: To return an item, contact support with your order ID and reason for return. We'll provide a prepaid shipping label via email within 24 hours. Items must be in original condition with tags attached.",
+    "warranty": "Warranty Information: All electronics come with a 1-year manufacturer warranty covering defects in materials and workmanship. Extended warranties available for purchase at checkout. Claims processed within 5 business days.",
+    "payment": "Payment Methods: We accept all major credit cards (Visa, Mastercard, American Express, Discover), PayPal, Apple Pay, and Google Pay. All transactions are encrypted and secure with PCI DSS compliance.",
+    "tracking": "Order Tracking: Track your order using the tracking number sent to your email after shipping. Allow 24 hours for tracking to become active. Contact support if tracking hasn't updated within 48 hours.",
+    "cancel": "Cancellation Policy: Orders can be cancelled within 2 hours of purchase for a full refund. After 2 hours but before shipping, contact support for assistance. Once shipped, standard return policy applies.",
+    "international": "International Shipping: We ship to over 50 countries worldwide. Customs fees and import duties are the responsibility of the customer. Delivery times vary by destination (7-21 business days).",
+    "support": "Customer Support Hours: Our support team is available Monday-Friday 9am-6pm EST, Saturday 10am-4pm EST. Weekend live chat available. Average response time: under 2 hours during business hours.",
+    "security": "Account Security: We recommend using strong passwords (min 12 characters) and enabling two-factor authentication. Never share your password. We'll never ask for your password via email or phone."
+}
+
+# Define Tools
 @tool
 def lookup_order(order_id: str) -> dict:
-    """Look up order details by order ID. Use this when customer mentions an order number."""
+    """Look up order details by order ID. Returns order information including items, status, and tracking."""
+    # Mock database
     orders = {
         "12345": {
-            "status": "Delivered",
-            "date": "2024-01-15",
-            "items": ["Laptop", "Mouse"],
+            "order_id": "12345",
+            "items": ["Laptop", "Wireless Mouse"],
             "total": "$1,299.99",
+            "status": "Delivered",
+            "delivery_date": "2024-01-15",
             "tracking": "TRACK123"
         },
         "67890": {
-            "status": "In Transit",
-            "date": "2024-01-20",
+            "order_id": "67890",
             "items": ["Headphones"],
             "total": "$299.99",
+            "status": "In Transit",
+            "estimated_delivery": "2024-01-20",
             "tracking": "TRACK456"
         }
     }
-    result = orders.get(order_id, {"error": "Order not found"})
-    return result
+    
+    order = orders.get(order_id)
+    if order:
+        return order
+    else:
+        return {"error": f"Order {order_id} not found"}
 
 @tool
 def process_refund(order_id: str, reason: str) -> dict:
-    """Process a refund for an order. Only use after confirming order exists."""
-    # Check if order exists first
-    orders = ["12345", "67890"]
-    if order_id not in orders:
-        return {"error": "Cannot process refund - order not found"}
+    """Process a refund for an order. Requires order ID and reason for refund."""
+    # Validate order exists
+    order = lookup_order.invoke({"order_id": order_id})
     
+    if "error" in order:
+        return {"error": f"Cannot process refund - order {order_id} not found"}
+    
+    # Process refund
+    refund_amount = order.get("total", "$0.00")
     return {
-        "success": True,
+        "status": "success",
         "refund_id": f"REF-{order_id}",
-        "amount": "$299.99",
-        "eta": "3-5 business days",
-        "reason": reason,
-        "message": "Refund processed successfully"
+        "amount": refund_amount,
+        "estimated_days": "3-5 business days",
+        "reason": reason
     }
 
-# Initialize ChromaDB for knowledge base
-try:
-    embeddings = HuggingFaceEmbeddings(
-    model_name="sentence-transformers/all-MiniLM-L6-v2",
-    model_kwargs={'device': 'cpu'},
-    encode_kwargs={'normalize_embeddings': True}
-	)
+@tool
+def search_knowledge_base(query: str) -> str:
+    """Search company knowledge base for policies and information."""
+    query_lower = query.lower()
     
-    knowledge_articles = [
-        "Refund Policy: We offer a 30-day money-back guarantee on all products. Simply contact support with your order ID and we'll process your refund within 3-5 business days.",
-        "Shipping Policy: All orders ship within 24 hours of purchase. Domestic delivery takes 3-5 business days, international shipping takes 7-14 days. Free shipping on orders over $50.",
-        "Return Process: To return an item, contact support with your order ID and reason for return. We'll provide a prepaid shipping label via email. Items must be in original condition.",
-        "Warranty Information: All electronics come with a 1-year manufacturer warranty covering defects in materials and workmanship. Extended warranties available for purchase.",
-        "Payment Methods: We accept all major credit cards (Visa, Mastercard, American Express), PayPal, Apple Pay, and Google Pay. All transactions are encrypted and secure.",
-        "Order Tracking: Track your order using the tracking number sent to your email after shipping. Allow 24 hours for tracking to become active.",
-        "Cancellation Policy: Orders can be cancelled within 2 hours of purchase for a full refund. After 2 hours, please contact support for assistance.",
-        "International Shipping: We ship to over 50 countries worldwide. Customs fees and import duties are the responsibility of the customer and vary by country.",
-        "Customer Support Hours: Our support team is available Monday-Friday 9am-6pm EST. Weekend support available via live chat. Emergency support: support@example.com",
-        "Account Security: We recommend using strong passwords and enabling two-factor authentication. Never share your password. We'll never ask for your password via email."
-    ]
+    # Direct keyword matching
+    for key, value in knowledge_base.items():
+        if key in query_lower:
+            return value
     
-    vectorstore = Chroma.from_texts(
-        texts=knowledge_articles,
-        embedding=embeddings,
-        persist_directory="./chroma_db"
-    )
+    # Common synonyms and variations
+    if any(word in query_lower for word in ["refund", "money back", "return money"]):
+        return knowledge_base["refund"]
+    if any(word in query_lower for word in ["ship", "delivery", "deliver", "shipping"]):
+        return knowledge_base["shipping"]
+    if any(word in query_lower for word in ["return", "send back"]):
+        return knowledge_base["return"]
+    if any(word in query_lower for word in ["warranty", "guarantee", "coverage"]):
+        return knowledge_base["warranty"]
+    if any(word in query_lower for word in ["pay", "payment", "credit card", "paypal"]):
+        return knowledge_base["payment"]
+    if any(word in query_lower for word in ["track", "tracking", "where is my order", "order status"]):
+        return knowledge_base["tracking"]
+    if any(word in query_lower for word in ["cancel", "cancellation"]):
+        return knowledge_base["cancel"]
+    if any(word in query_lower for word in ["international", "overseas", "abroad"]):
+        return knowledge_base["international"]
+    if any(word in query_lower for word in ["support", "help", "contact", "hours"]):
+        return knowledge_base["support"]
+    if any(word in query_lower for word in ["security", "password", "account safety", "2fa"]):
+        return knowledge_base["security"]
     
-    @tool
-    def search_knowledge_base(query: str) -> str:
-        """Search company knowledge base for policies, procedures, and information. Use this to answer policy questions."""
-        docs = vectorstore.similarity_search(query, k=2)
-        result = "\n\n".join([doc.page_content for doc in docs])
-        return result
-    
-except Exception as e:
-    print(f"Warning: ChromaDB initialization failed: {e}")
-    # Fallback to simple dict-based search
-    knowledge_dict = {
-        "refund": "Refund Policy: 30-day money-back guarantee. Contact support with order ID.",
-        "shipping": "Shipping Policy: Ships in 24hrs. 3-5 days domestic, 7-14 international.",
-        "return": "Return Process: Contact support with order ID for prepaid label.",
-    }
-    
-    @tool
-    def search_knowledge_base(query: str) -> str:
-        """Search company knowledge base for policies and information."""
-        query_lower = query.lower()
-        for key, value in knowledge_dict.items():
-            if key in query_lower:
-                return value
-        return "Please contact support for more information."
+    return "I don't have specific information about that in our knowledge base. Please contact our support team at support@example.com or call 1-800-SUPPORT for assistance."
 
-# Create agent
+# Initialize LangChain Agent
 tools = [lookup_order, process_refund, search_knowledge_base]
 
+# Create prompt template
 prompt = ChatPromptTemplate.from_messages([
-    ("system", """You are a helpful customer service AI assistant for an e-commerce company.
+    ("system", """You are a helpful customer service agent. You have access to tools to:
+1. Look up order information
+2. Process refunds
+3. Search the knowledge base for policies
 
-Your capabilities:
-- Look up order information using order IDs
-- Process refunds when customers request them
-- Search the knowledge base to answer policy questions
+When a customer asks about an order, use the lookup_order tool.
+When a customer wants a refund, first look up the order, then process the refund.
+When a customer asks about policies, use the search_knowledge_base tool.
 
-Guidelines:
-1. Always be friendly and professional
-2. If you need information (like an order ID), ask the customer politely
-3. When using a tool, briefly explain what you're doing
-4. After looking up an order, summarize the key information clearly
-5. For refunds, confirm the order exists first, then process
-6. Cite specific policies when answering policy questions
-
-Remember: You're here to help customers efficiently and professionally.
-"""),
+Be friendly, helpful, and professional. Always explain what you're doing."""),
     MessagesPlaceholder(variable_name="chat_history"),
     ("human", "{input}"),
     MessagesPlaceholder(variable_name="agent_scratchpad"),
 ])
 
+# Initialize LLM
+llm = ChatAnthropic(
+    model="claude-3-5-sonnet-20241022",
+    temperature=0,
+    api_key=os.getenv("ANTHROPIC_API_KEY")
+)
+
+# Create agent
 agent = create_tool_calling_agent(llm=llm, tools=tools, prompt=prompt)
 
-# Session memory storage
-sessions = {}
-
-def get_agent_executor(session_id: str):
-    """Get or create agent executor for a session"""
-    if session_id not in sessions:
-        sessions[session_id] = ConversationBufferMemory(
-            memory_key="chat_history",
-            return_messages=True
-        )
-    
-    return AgentExecutor(
-        agent=agent,
-        tools=tools,
-        memory=sessions[session_id],
-        verbose=True,
-        return_intermediate_steps=True,
-        max_iterations=5,
-        handle_parsing_errors=True
-    )
-
-# API Models
+# Request/Response models
 class ChatRequest(BaseModel):
     message: str
     session_id: str = "default"
 
-class AgentStep(BaseModel):
-    tool: str
-    input: str
-    output: str
-
 class ChatResponse(BaseModel):
     response: str
-    agent_steps: List[AgentStep]
-    tools_used: List[str]
+    agent_steps: List[Dict] = []
+    tools_used: List[str] = []
 
-# Endpoints
-@app.get("/")
-async def root():
-    return {
-        "message": "Agentic CX Assistant API",
-        "status": "operational",
-        "version": "1.0",
-        "endpoints": {
-            "health": "/health",
-            "chat": "/chat",
-            "status": "/status"
-        }
-    }
-
+# API Endpoints
 @app.get("/health")
-async def health():
+def health_check():
     return {"status": "healthy", "agent": "ready"}
 
 @app.get("/status")
-async def status():
+def status():
     return {
         "tools_available": [tool.name for tool in tools],
         "active_sessions": len(sessions),
-        "vector_db": "chromadb",
-        "llm": "claude-3.5-sonnet"
+        "llm": "claude-3.5-sonnet-20241022"
     }
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
-    """Main chat endpoint - processes messages through LangChain agent"""
     try:
-        # Get agent executor for this session
-        executor = get_agent_executor(request.session_id)
+        # Get or create session memory
+        if request.session_id not in sessions:
+            sessions[request.session_id] = ConversationBufferMemory(
+                memory_key="chat_history",
+                return_messages=True
+            )
+        
+        memory = sessions[request.session_id]
+        
+        # Create executor with memory
+        executor = AgentExecutor(
+            agent=agent,
+            tools=tools,
+            memory=memory,
+            verbose=True,
+            return_intermediate_steps=True,
+            max_iterations=5,
+            handle_parsing_errors=True
+        )
         
         # Execute agent
         result = executor.invoke({"input": request.message})
@@ -230,32 +210,34 @@ async def chat(request: ChatRequest):
         agent_steps = []
         tools_used = []
         
-        for step in result.get("intermediate_steps", []):
-            action, observation = step
-            tools_used.append(action.tool)
-            agent_steps.append(AgentStep(
-                tool=action.tool,
-                input=str(action.tool_input),
-                output=str(observation)[:500]  # Truncate long outputs
-            ))
+        if "intermediate_steps" in result:
+            for step in result["intermediate_steps"]:
+                action, output = step
+                agent_steps.append({
+                    "tool": action.tool,
+                    "input": str(action.tool_input),
+                    "output": str(output)
+                })
+                if action.tool not in tools_used:
+                    tools_used.append(action.tool)
         
         return ChatResponse(
             response=result["output"],
             agent_steps=agent_steps,
-            tools_used=list(set(tools_used))  # Unique tools
+            tools_used=tools_used
         )
-    
+        
     except Exception as e:
-        print(f"Error in chat endpoint: {str(e)}")
-        raise HTTPException(
-            status_code=500, 
-            detail=f"Agent error: {str(e)}"
-        )
+        print(f"Error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/session/{session_id}")
-async def clear_session(session_id: str):
-    """Clear a session's memory"""
+def clear_session(session_id: str):
     if session_id in sessions:
         del sessions[session_id]
-        return {"message": f"Session {session_id} cleared"}
-    return {"message": "Session not found"}
+        return {"status": "cleared", "session_id": session_id}
+    return {"status": "not_found", "session_id": session_id}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

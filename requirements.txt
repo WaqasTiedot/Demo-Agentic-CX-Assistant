@@ -4,7 +4,5 @@ langchain==0.3.15
 langchain-anthropic==0.3.8
 langchain-community==0.3.14
 anthropic==0.47.0
-chromadb==0.5.23
-sentence-transformers==3.3.1
 pydantic==2.10.6
 python-dotenv==1.0.1
