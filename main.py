@@ -5,7 +5,7 @@ from typing import List, Dict, Optional
 import os
 import uuid
 
-from langchain.agents import AgentExecutor, create_openai_tools_agent
+from langchain.agents import AgentExecutor, create_tool_calling_agent
 
 from langchain_anthropic import ChatAnthropic
 from langchain_community.embeddings import HuggingFaceEmbeddings
@@ -151,7 +151,7 @@ Remember: You're here to help customers efficiently and professionally.
     MessagesPlaceholder(variable_name="agent_scratchpad"),
 ])
 
-agent = create_openai_tools_agent(llm=llm, tools=tools, prompt=prompt)
+agent = create_tool_calling_agent(llm=llm, tools=tools, prompt=prompt)
 
 # Session memory storage
 sessions = {}
