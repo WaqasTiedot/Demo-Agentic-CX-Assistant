@@ -149,7 +149,7 @@ Be friendly, helpful, and professional. Always explain what you're doing."""),
 
 # Initialize LLM
 llm = ChatAnthropic(
-    model="claude-3-5-sonnet-20241022",
+    model="claude-3-5-sonnet-20240620",
     temperature=0,
     api_key=os.getenv("ANTHROPIC_API_KEY")
 )
@@ -177,7 +177,7 @@ def status():
     return {
         "tools_available": [tool.name for tool in tools],
         "active_sessions": len(sessions),
-        "llm": "claude-3.5-sonnet-20241022"
+        "llm": "claude-3.5-sonnet-20240620"
     }
 
 @app.post("/chat", response_model=ChatResponse)
