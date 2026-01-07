@@ -206,6 +206,32 @@ async def chat(request: ChatRequest):
         # Execute agent
         result = executor.invoke({"input": request.message})
         
+        # Extract response text - handle both string and list formats
+        output = result.get("output", "")
+        
+        # Handle different output formats from new LangChain versions
+        response_text = ""
+        if isinstance(output, list):
+            # Extract text from list of message chunks
+            for item in output:
+                if isinstance(item, dict):
+                    if "text" in item:
+                        response_text += item["text"]
+                    elif "content" in item:
+                        response_text += str(item["content"])
+                elif isinstance(item, str):
+                    response_text += item
+                else:
+                    response_text += str(item)
+        elif isinstance(output, str):
+            response_text = output
+        else:
+            response_text = str(output)
+        
+        # Fallback if response is empty
+        if not response_text or response_text.strip() == "":
+            response_text = "I processed your request but encountered an issue formatting the response. Please try again."
+        
         # Extract agent steps and tools used
         agent_steps = []
         tools_used = []
@@ -222,13 +248,15 @@ async def chat(request: ChatRequest):
                     tools_used.append(action.tool)
         
         return ChatResponse(
-            response=result["output"],
+            response=response_text,
             agent_steps=agent_steps,
             tools_used=tools_used
         )
         
     except Exception as e:
         print(f"Error: {str(e)}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/session/{session_id}")
