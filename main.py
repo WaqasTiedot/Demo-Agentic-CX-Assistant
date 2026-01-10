@@ -4,6 +4,8 @@ from pydantic import BaseModel
 from typing import Optional, List, Dict
 import os
 from dotenv import load_dotenv
+from datetime import datetime, timedelta
+import random
 
 # LangChain imports
 from langchain_anthropic import ChatAnthropic
@@ -44,18 +46,28 @@ knowledge_base = {
     "security": "Account Security: We recommend using strong passwords (min 12 characters) and enabling two-factor authentication. Never share your password. We'll never ask for your password via email or phone."
 }
 
+# Helper function to generate recent date
+def get_random_recent_date():
+    """Generate a random date within the last 7 days"""
+    days_ago = random.randint(1, 7)
+    date = datetime.now() - timedelta(days=days_ago)
+    return date.strftime("%Y-%m-%d")
+
 # Define Tools
 @tool
 def lookup_order(order_id: str) -> dict:
     """Look up order details by order ID. Returns order information including items, status, and tracking."""
-    # Mock database
+    # Generate dynamic recent date
+    recent_date = get_random_recent_date()
+    
+    # Mock database with dynamic dates
     orders = {
         "12345": {
             "order_id": "12345",
             "items": ["Laptop", "Wireless Mouse"],
             "total": "$1,299.99",
             "status": "Delivered",
-            "delivery_date": "2024-01-15",
+            "delivery_date": recent_date,
             "tracking": "TRACK123"
         },
         "67890": {
@@ -63,7 +75,7 @@ def lookup_order(order_id: str) -> dict:
             "items": ["Headphones"],
             "total": "$299.99",
             "status": "In Transit",
-            "estimated_delivery": "2024-01-20",
+            "estimated_delivery": (datetime.now() + timedelta(days=random.randint(2, 5))).strftime("%Y-%m-%d"),
             "tracking": "TRACK456"
         }
     }
